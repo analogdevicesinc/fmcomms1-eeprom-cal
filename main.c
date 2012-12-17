@@ -1,3 +1,10 @@
+/*
+ * fmcomms1-eeprom-cal
+ *
+ * Copyright 2012 Analog Devices Inc.
+ *
+ * Licensed under the GPL-2.
+ */
 #include <stdio.h>
 #include <stdlib.h>
 #include <errno.h>
