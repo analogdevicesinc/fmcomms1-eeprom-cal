@@ -24,8 +24,22 @@
 
 void showusage(char *pgmname)
 {
-	printf("Usage: %s [-f frequency (MHz)] [-s] file\n", pgmname);
+	printf("Usage: %s [-f frequency (MHz)] [-s -r -t] file\n", pgmname);
 	abort();
+}
+
+double fract_to_float(unsigned short val)
+{
+	double ret = 0;
+
+	if (val & 0x8000) {
+		ret = 1.0000;
+		val &= ~0x8000;
+	}
+
+	ret += (double)val / 0x8000;
+
+	return ret;
 }
 
 void print_entry(struct fmcomms1_calib_data *data)
@@ -40,27 +54,34 @@ void print_entry(struct fmcomms1_calib_data *data)
 	printf("DAC Q Full Scale Adj:\t%u\n", data->q_dac_fs_adj);
 	printf("ADC I Offset:\t\t%d\n", data->i_adc_offset_adj);
 	printf("ADC Q Offset:\t\t%d\n", data->q_adc_offset_adj);
-	printf("ADC I Gain Adj:\t%u\n", data->i_adc_gain_adj);
-	printf("ADC Q Gain Adj:\t%u\n", data->q_adc_gain_adj);
+	printf("ADC I Gain Adj:\t%f\n", fract_to_float(data->i_adc_gain_adj));
+	printf("ADC Q Gain Adj:\t%f\n", fract_to_float(data->q_adc_gain_adj));
 }
 
-void store_entry_hw(struct fmcomms1_calib_data *data)
+void store_entry_hw(struct fmcomms1_calib_data *data, unsigned tx, unsigned rx)
 {
+
+	if (!(tx || rx))
+		return;
+
 	FILE *gp = popen("iio_cmdsrv","w");
 	if (gp) {
-		fprintf(gp, "write cf-ad9122-core-lpc out_voltage0_calibbias %d\n", data->i_dac_offset);
-		fprintf(gp, "write cf-ad9122-core-lpc out_voltage0_calibscale %d\n", data->i_dac_fs_adj);
-		fprintf(gp, "write cf-ad9122-core-lpc out_voltage0_phase %d\n", data->i_phase_adj);
-		fprintf(gp, "write cf-ad9122-core-lpc out_voltage1_calibbias %d\n", data->q_dac_offset);
-		fprintf(gp, "write cf-ad9122-core-lpc out_voltage1_calibscale %d\n", data->q_dac_fs_adj);
-		fprintf(gp, "write cf-ad9122-core-lpc out_voltage1_phase %d\n", data->q_phase_adj);
-		fflush(gp);
-
-		fprintf(gp, "write cf-ad9643-core-lpc in_voltage0_calibbias %d\n", data->i_adc_offset_adj);
-		fprintf(gp, "write cf-ad9643-core-lpc in_voltage0_calibscale %d\n", data->i_adc_gain_adj);
-		fprintf(gp, "write cf-ad9643-core-lpc in_voltage1_calibbias %d\n", data->q_adc_offset_adj);
-		fprintf(gp, "write cf-ad9643-core-lpc in_voltage1_calibscale %d\n", data->q_adc_gain_adj);
-		fflush(gp);
+		if (tx) {
+			fprintf(gp, "write cf-ad9122-core-lpc out_voltage0_calibbias %d\n", data->i_dac_offset);
+			fprintf(gp, "write cf-ad9122-core-lpc out_voltage0_calibscale %d\n", data->i_dac_fs_adj);
+			fprintf(gp, "write cf-ad9122-core-lpc out_voltage0_phase %d\n", data->i_phase_adj);
+			fprintf(gp, "write cf-ad9122-core-lpc out_voltage1_calibbias %d\n", data->q_dac_offset);
+			fprintf(gp, "write cf-ad9122-core-lpc out_voltage1_calibscale %d\n", data->q_dac_fs_adj);
+			fprintf(gp, "write cf-ad9122-core-lpc out_voltage1_phase %d\n", data->q_phase_adj);
+			fflush(gp);
+		}
+		if (rx) {
+			fprintf(gp, "write cf-ad9643-core-lpc in_voltage0_calibbias %d\n", data->i_adc_offset_adj);
+			fprintf(gp, "write cf-ad9643-core-lpc in_voltage0_calibscale %f\n", fract_to_float(data->i_adc_gain_adj));
+			fprintf(gp, "write cf-ad9643-core-lpc in_voltage1_calibbias %d\n", data->q_adc_offset_adj);
+			fprintf(gp, "write cf-ad9643-core-lpc in_voltage1_calibscale %f\n", fract_to_float(data->q_adc_gain_adj));
+			fflush(gp);
+		}
 		pclose(gp);
 	} else {
 		fprintf (stderr, "popen iio_cmdsrv failed %d\n", errno);
@@ -71,17 +92,24 @@ int main (int argc , char* argv[])
 {
 	FILE *fp;
 	struct fmcomms1_calib_data *data, *data2;
-	int c, set = 0, len, ind = 0;
+	int c, set_tx = 0, set_rx = 0, len, ind = 0;
 	int f = 0, delta, gindex;
-	unsigned int min_delta = 0xFFFFFFFF;
+	int min_delta = 2147483647;
 
-	while ((c = getopt (argc, argv, "sf:")) != -1)
+	while ((c = getopt (argc, argv, "strf:")) != -1)
 		switch (c) {
 		case 'f':
 			f = atoi(optarg);
 			break;
 		case 's':
-			set = 1;
+			set_tx = 1;
+			set_rx = 1;
+			break;
+		case 't':
+			set_tx = 1;
+			break;
+		case 'r':
+			set_rx = 1;
 			break;
 		case '?':
 			if (optopt == 'c')
@@ -149,9 +177,7 @@ int main (int argc , char* argv[])
 	if (f) {
 		printf("\n--- Best match ENTRY %d ---\n", gindex);
 		print_entry(&data2[gindex]);
-		if (set)
-			store_entry_hw(&data2[gindex]);
-
+		store_entry_hw(&data2[gindex], set_tx, set_rx);
 	}
 
 	fclose(fp);
