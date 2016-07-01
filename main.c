@@ -1,7 +1,7 @@
 /*
  * fmcomms1-eeprom-cal
  *
- * Copyright 2012-2014 Analog Devices Inc.
+ * Copyright 2012-2016 Analog Devices Inc.
  *
  * Licensed under the GPL-2.
  */
@@ -17,6 +17,7 @@
 #include <sys/stat.h>
 #include <sys/dir.h>
 #include <ctype.h>
+#include <iio.h>
 
 #include "eeprom.h"
 
@@ -64,33 +65,47 @@ void print_entry_v1(struct fmcomms1_calib_data_v1 *data)
 
 void store_entry_hw(struct fmcomms1_calib_data *data, unsigned tx, unsigned rx)
 {
+	struct iio_context *ctx;
+	static struct iio_device *dev_adc, *dev_dac;
 
 	if (!(tx || rx))
 		return;
 
-	FILE *gp = popen("iio_cmdsrv","w");
-	if (gp) {
+	ctx = iio_create_default_context();
+	dev_dac = iio_context_find_device(ctx, "cf-ad9122-core-lpc");
+	dev_adc = iio_context_find_device(ctx, "cf-ad9643-core-lpc");
+
+	if (dev_dac && dev_adc) {
+
+		struct iio_channel *ch;
+
 		if (tx) {
-			fprintf(gp, "write cf-ad9122-core-lpc out_voltage0_calibbias %d\n", data->i_dac_offset);
-			fprintf(gp, "write cf-ad9122-core-lpc out_voltage0_calibscale %d\n", data->i_dac_fs_adj);
-			fprintf(gp, "write cf-ad9122-core-lpc out_voltage0_phase %d\n", data->i_phase_adj);
-			fprintf(gp, "write cf-ad9122-core-lpc out_voltage1_calibbias %d\n", data->q_dac_offset);
-			fprintf(gp, "write cf-ad9122-core-lpc out_voltage1_calibscale %d\n", data->q_dac_fs_adj);
-			fprintf(gp, "write cf-ad9122-core-lpc out_voltage1_phase %d\n", data->q_phase_adj);
-			fflush(gp);
+
+			ch = iio_device_find_channel(dev_dac, "voltage0", true);
+			iio_channel_attr_write_longlong(ch, "calibbias", data->i_dac_offset);
+			iio_channel_attr_write_longlong(ch, "calibscale", data->i_dac_fs_adj);
+			iio_channel_attr_write_longlong(ch, "phase", data->i_phase_adj);
+
+			ch = iio_device_find_channel(dev_dac, "voltage1", true);
+			iio_channel_attr_write_longlong(ch, "calibbias", data->q_dac_offset);
+			iio_channel_attr_write_longlong(ch, "calibscale", data->q_dac_fs_adj);
+			iio_channel_attr_write_longlong(ch, "phase", data->q_phase_adj);
 		}
+
 		if (rx) {
-			fprintf(gp, "write cf-ad9643-core-lpc in_voltage0_calibbias %d\n", data->i_adc_offset_adj);
-			fprintf(gp, "write cf-ad9643-core-lpc in_voltage0_calibscale %f\n", fract1_15_to_float(data->i_adc_gain_adj));
-			fprintf(gp, "write cf-ad9643-core-lpc in_voltage0_calibphase %f\n", 0.0);
-			fprintf(gp, "write cf-ad9643-core-lpc in_voltage1_calibbias %d\n", data->q_adc_offset_adj);
-			fprintf(gp, "write cf-ad9643-core-lpc in_voltage1_calibscale %f\n", fract1_15_to_float(data->q_adc_gain_adj));
-			fprintf(gp, "write cf-ad9643-core-lpc in_voltage1_calibphase %f\n", 0.0);
-			fflush(gp);
+
+			ch = iio_device_find_channel(dev_adc, "voltage0", false);
+			iio_channel_attr_write_longlong(ch, "calibbias", data->i_adc_offset_adj);
+			iio_channel_attr_write_double(ch, "calibscale", fract1_15_to_float(data->i_adc_gain_adj));
+			iio_channel_attr_write_double(ch, "calibphase", 0.0);
+
+			ch = iio_device_find_channel(dev_adc, "voltage1", false);
+			iio_channel_attr_write_longlong(ch, "calibbias", data->q_adc_offset_adj);
+			iio_channel_attr_write_double(ch, "calibscale", fract1_15_to_float(data->q_adc_gain_adj));
+			iio_channel_attr_write_double(ch, "calibphase", 0.0);
 		}
-		pclose(gp);
 	} else {
-		fprintf (stderr, "popen iio_cmdsrv failed %d\n", errno);
+		fprintf (stderr, "Failed to find devices %d\n", errno);
 	}
 }
 
@@ -98,40 +113,53 @@ void store_entry_hw_v1(struct fmcomms1_calib_data_v1 *data, unsigned tx,
 		       unsigned rx, unsigned short temp_calibbias)
 {
 
+	struct iio_context *ctx;
+	static struct iio_device *dev_adc, *dev_dac;
+
 	if (!(tx || rx))
 		return;
 
-	FILE *gp = popen("iio_cmdsrv","w");
-	if (gp) {
+	ctx = iio_create_default_context();
+	dev_dac = iio_context_find_device(ctx, "cf-ad9122-core-lpc");
+	dev_adc = iio_context_find_device(ctx, "cf-ad9643-core-lpc");
 
-		fprintf(gp, "write cf-ad9122-core-lpc in_temp0_calibbias %d\n", temp_calibbias);
+	if (dev_dac && dev_adc) {
+
+		struct iio_channel *ch;
+
+		ch = iio_device_find_channel(dev_dac, "temp0", false);
+		iio_channel_attr_write_longlong(ch, "calibbias", temp_calibbias);
 
 		if (tx) {
-			fprintf(gp, "write cf-ad9122-core-lpc out_voltage0_calibbias %d\n", data->i_dac_offset);
-			fprintf(gp, "write cf-ad9122-core-lpc out_voltage0_calibscale %d\n", data->i_dac_fs_adj);
-			fprintf(gp, "write cf-ad9122-core-lpc out_voltage0_phase %d\n", data->i_phase_adj);
-			fprintf(gp, "write cf-ad9122-core-lpc out_voltage1_calibbias %d\n", data->q_dac_offset);
-			fprintf(gp, "write cf-ad9122-core-lpc out_voltage1_calibscale %d\n", data->q_dac_fs_adj);
-			fprintf(gp, "write cf-ad9122-core-lpc out_voltage1_phase %d\n", data->q_phase_adj);
-			fflush(gp);
+			ch = iio_device_find_channel(dev_dac, "voltage0", true);
+			iio_channel_attr_write_longlong(ch, "calibbias", data->i_dac_offset);
+			iio_channel_attr_write_longlong(ch, "calibscale", data->i_dac_fs_adj);
+			iio_channel_attr_write_longlong(ch, "phase", data->i_phase_adj);
+
+			ch = iio_device_find_channel(dev_dac, "voltage1", true);
+			iio_channel_attr_write_longlong(ch, "calibbias", data->q_dac_offset);
+			iio_channel_attr_write_longlong(ch, "calibscale", data->q_dac_fs_adj);
+			iio_channel_attr_write_longlong(ch, "phase", data->q_phase_adj);
 		}
 		if (rx) {
-			fprintf(gp, "write cf-ad9643-core-lpc in_voltage0_calibbias %d\n", data->i_adc_offset_adj);
-			fprintf(gp, "write cf-ad9643-core-lpc in_voltage0_calibscale %f\n", fract1_1_14_to_float(data->i_adc_gain_adj));
-			fprintf(gp, "write cf-ad9643-core-lpc in_voltage0_calibphase %f\n", fract1_1_14_to_float(data->i_adc_phase_adj));
-			fprintf(gp, "write cf-ad9643-core-lpc in_voltage1_calibbias %d\n", data->q_adc_offset_adj);
-			fprintf(gp, "write cf-ad9643-core-lpc in_voltage1_calibscale %f\n", fract1_1_14_to_float(data->q_adc_gain_adj));
-			fprintf(gp, "write cf-ad9643-core-lpc in_voltage1_calibphase %f\n", 0.0);
-			fflush(gp);
+			ch = iio_device_find_channel(dev_adc, "voltage0", false);
+			iio_channel_attr_write_longlong(ch, "calibbias", data->i_adc_offset_adj);
+			iio_channel_attr_write_double(ch, "calibscale", fract1_1_14_to_float(data->i_adc_gain_adj));
+			iio_channel_attr_write_double(ch, "calibphase", fract1_1_14_to_float(data->i_adc_phase_adj));
+
+			ch = iio_device_find_channel(dev_adc, "voltage1", false);
+			iio_channel_attr_write_longlong(ch, "calibbias", data->q_adc_offset_adj);
+			iio_channel_attr_write_double(ch, "calibscale", fract1_1_14_to_float(data->q_adc_gain_adj));
+			iio_channel_attr_write_double(ch, "calibphase", 0.0);
 		}
-		pclose(gp);
 	} else {
-		fprintf (stderr, "popen iio_cmdsrv failed %d\n", errno);
+		fprintf (stderr, "Failed to find devices %d\n", errno);
 	}
 }
 
 int main (int argc , char* argv[])
 {
+
 	FILE *fp;
 	struct fmcomms1_calib_header_v1 *header;
 	char *buf;
